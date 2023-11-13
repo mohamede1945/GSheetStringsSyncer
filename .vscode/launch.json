@@ -1,0 +1,48 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "[Mohamed] Upload",
+            "type": "python",
+            "request": "launch",
+            "program": "gsheet_strings_syncer.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "--operation",
+                "upload",
+                "--sheet-url",
+                "https://docs.google.com/spreadsheets/d/1hqhbv19ohkUCfFp0u0hiva1aGqVIUIboR4_8Y5_IUng/edit#gid=0",
+                "--resources-path",
+                "/Users/mohamed/Work/Projects/Quran/quran-ios/Core/Localization/Resources",
+                "--file",
+                "Localizable.strings",
+                "--sheet-name",
+                "Sheet1"
+            ]
+        },
+        {
+            "name": "[Mohamed] Download",
+            "type": "python",
+            "request": "launch",
+            "program": "gsheet_strings_syncer.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "--operation",
+                "download",
+                "--sheet-url",
+                "https://docs.google.com/spreadsheets/d/1hqhbv19ohkUCfFp0u0hiva1aGqVIUIboR4_8Y5_IUng/edit#gid=0",
+                "--resources-path",
+                "/Users/mohamed/Work/Projects/Quran/quran-ios/Core/Localization/Resources",
+                "--file",
+                "Localizable.strings",
+                "--sheet-name",
+                "Sheet1"
+            ]
+        }
+    ]
+}
