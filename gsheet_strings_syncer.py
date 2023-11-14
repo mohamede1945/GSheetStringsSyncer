@@ -7,6 +7,12 @@ import pickle
 import re
 import argparse
 
+
+class Struct:
+    def __init__(self, **kwds):
+        self.__dict__.update(kwds)
+
+
 # If modifying these SCOPES, delete the file token.pickle.
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 
@@ -88,15 +94,25 @@ def start_sheets_service():
     return sheet
 
 
-def parse_localizable_file(file_path):
-    with open(file_path, 'r', encoding='utf-8') as file:
-        lines = file.readlines()
+def append_comment(list, comment, combine_comments):
+    # Amend to the comment if not changed
+    if combine_comments and len(list) > 0 and isinstance(list[-1], str):
+        list[-1] = f"{list[-1]}\n{comment}"
+    else:
+        list.append(comment)
 
-    parsed_data = []
-    keys = dict()
+
+def parse_localizable_file(file_path, combine_comments):
+    with open(file_path, 'r', encoding='utf-8') as file:
+        file_lines = file.readlines()
+
+    lines = []
+    dict = {}
     current_comment = ""
 
-    for line in lines:
+    header = ""
+
+    for line in file_lines:
         line = line.strip('\n')
         stripped_line = line.strip()
 
@@ -105,18 +121,22 @@ def parse_localizable_file(file_path):
             current_comment = line + "\n"  # Start a new comment
         elif stripped_line.endswith('*/'):
             current_comment += line  # End of multi-line comment
-            parsed_data.append(current_comment)
+            if header:
+                append_comment(lines, current_comment, combine_comments)
+            else:
+                header = current_comment
+
             current_comment = ""
         elif current_comment:
             current_comment += line + "\n"  # Continue multi-line comment
 
         # Handle single-line comments
         elif stripped_line.startswith('//'):
-            parsed_data.append(line)
+            append_comment(lines, line, combine_comments)
 
         # Handle empty lines
         elif not stripped_line:
-            parsed_data.append(empty_line)
+            append_comment(lines, empty_line, combine_comments)
 
         # Handle key-value pairs
         elif '"' in line:
@@ -124,10 +144,10 @@ def parse_localizable_file(file_path):
             if match:
                 key, value = match.groups()
                 value = decode_escaped_string(value)
-                keys[key] = value
-                parsed_data.append((key, value))
+                dict[key] = value
+                lines.append(Struct(key=key, value=value))
 
-    return parsed_data, keys
+    return Struct(header=header, lines=lines, dict=dict)
 
 
 def upload_to_sheets(sheet_service, spreadsheet_id, sheet_name, values, column_index):
@@ -139,43 +159,48 @@ def upload_to_sheets(sheet_service, spreadsheet_id, sheet_name, values, column_i
     print(f"Uploaded column '{values[0][0]}' => {result}")
 
 
-def upload_translations_to_sheets(sheet_service, spreadsheet_id, sheet_name, lang, reference_data, translations, translations_dict, column_index):
+def is_comment(line):
+    return isinstance(line, str)
+
+
+def is_translation(line):
+    return isinstance(line, Struct) and hasattr(line, 'key') and hasattr(line, 'value')
+
+
+def upload_translations_to_sheets(sheet_service, spreadsheet_id, sheet_name, lang, reference, translation, column_index):
     # Prepare values for the translations column C, D, etc
     language = f"{lang[0]} - {lang[1]}"
-    first_translation = item_or_empty(translations, 0)
-    header = first_translation if isinstance(first_translation, str) else ""
-    translations = [translations_dict.get(item[0], "")
-                    if isinstance(item, tuple) else "" for item in reference_data[1:]]
-    values = [[language]] + [[header]] + [[translation] for translation in translations]
+    translations_values = [translation.dict.get(line.key, "")
+                           if is_translation(line) else "" for line in reference.lines]
+    values = [[language]] + [[translation.header]] + [[translation] for translation in translations_values]
     upload_to_sheets(sheet_service, spreadsheet_id, sheet_name, values, column_index)
 
 
-def upload_keys_to_sheets(sheet_service, spreadsheet_id, sheet_name, reference_data):
+def upload_keys_to_sheets(sheet_service, spreadsheet_id, sheet_name, reference):
     # Prepare comments for column A
-    comments = [item if isinstance(item, str) else "" for item in reference_data]
-    comments_values = [["Comments"], ["Header"]] + [[comment] for comment in comments[1:]]
+    comments = [line if is_comment(line) else "" for line in reference.lines]
+    comments_values = [["Comments"], ["Header"]] + [[comment] for comment in comments]
     upload_to_sheets(sheet_service, spreadsheet_id, sheet_name, comments_values, 1)
 
     # Prepare keys for column B
-    translations = [item if isinstance(item, tuple) else ("", "") for item in reference_data]
-    keys_values = [["Key"]] + [[translation[0]] for translation in translations]
+    keys = [line.key if is_translation(line) else "" for line in reference.lines]
+    keys_values = [["Key"], [""]] + [[key] for key in keys]
     upload_to_sheets(sheet_service, spreadsheet_id, sheet_name, keys_values, 2)
 
 
 def upload_localizable_files(sheet_service, sheet_id, sheet_name, languages, resources_path, file_name):
     # Assume keys are the same for all languages, so use the first language for keys
     reference_lang_path = os.path.join(resources_path, f'{languages[reference_index][0]}.lproj/{file_name}')
-    reference_data, _ = parse_localizable_file(reference_lang_path)
+    reference = parse_localizable_file(reference_lang_path, True)
 
     # Upload keys to the first column
-    upload_keys_to_sheets(sheet_service, sheet_id, sheet_name, reference_data)
+    upload_keys_to_sheets(sheet_service, sheet_id, sheet_name, reference)
 
     # Upload translations for each language
     for index, lang in enumerate(languages, start=3):  # Starting from column C
         file_path = os.path.join(resources_path, f'{lang[0]}.lproj/{file_name}')
-        translations, translations_dict = parse_localizable_file(file_path)
-        upload_translations_to_sheets(sheet_service, sheet_id, sheet_name, lang,
-                                      reference_data, translations, translations_dict, index)
+        translation = parse_localizable_file(file_path, False)
+        upload_translations_to_sheets(sheet_service, sheet_id, sheet_name, lang, reference, translation, index)
 
 
 def download_from_sheets(sheet_service, spreadsheet_id, sheet_name, num_columns):
@@ -198,17 +223,16 @@ def download_localizable_files(sheet_service, spreadsheet_id, sheet_name, langua
 
             # Write the header
             header = item_or_empty(values[1], index)
-            if header != "" and header != empty_line:
+            if header != "":
                 file.write(f"{header}\n")
 
             for row in values[2:]:
                 comment = item_or_empty(row, comments_column)
                 key = item_or_empty(row, key_column)
                 value = item_or_empty(row, index)
-                if comment == empty_line:
-                    file.write("\n")
-                elif comment != "":
-                    file.write(f"{comment}\n")
+                if comment != "":
+                    formatted_comment = comment.replace(empty_line, "")
+                    file.write(f"{formatted_comment}\n")
                 elif key != "" and value != "":
                     file.write(f'"{key}" = "{encode_escaped_string(value)}";\n')
         print(f"Downloaded '{file_path}")
