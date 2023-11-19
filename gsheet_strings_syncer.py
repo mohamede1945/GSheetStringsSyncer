@@ -36,6 +36,9 @@ languages = [
 ]
 reference_index = 0
 empty_line = '<<< EMPTY LINE >>>'
+metadata_prefix = '// Metadata:'
+
+no_translation = Struct(key='', value='', metadata='')
 
 
 def extract_sheet_id_from_url(url):
@@ -102,6 +105,20 @@ def append_comment(list, comment, combine_comments):
         list.append(comment)
 
 
+def extract_metadata(list):
+    metadata = ""
+    if len(list) > 0 and isinstance(list[-1], str):
+        # Last comment could have been joined before into multiple lines.
+        comment_lines = list[-1].split('\n')
+        if comment_lines[-1].startswith(metadata_prefix):
+            metadata = comment_lines[-1].replace(metadata_prefix, '').strip()
+            list.pop()
+            # If the comment has more than 1 lines, keep the other lines and remove the metadata one.
+            if len(comment_lines) > 1:
+                list.append('\n'.join(comment_lines[:-1]))
+    return metadata
+
+
 def parse_localizable_file(file_path, combine_comments):
     with open(file_path, 'r', encoding='utf-8') as file:
         file_lines = file.readlines()
@@ -144,8 +161,10 @@ def parse_localizable_file(file_path, combine_comments):
             if match:
                 key, value = match.groups()
                 value = decode_escaped_string(value)
-                dict[key] = value
-                lines.append(Struct(key=key, value=value))
+                metadata = extract_metadata(lines)
+                translation = Struct(key=key, value=value, metadata=metadata)
+                dict[key] = translation
+                lines.append(translation)
 
     return Struct(header=header, lines=lines, dict=dict)
 
@@ -167,13 +186,22 @@ def is_translation(line):
     return isinstance(line, Struct) and hasattr(line, 'key') and hasattr(line, 'value')
 
 
+def translation_data(reference, translation, attribute):
+    return [getattr(translation.dict.get(line.key, no_translation), attribute)
+            if is_translation(line) else "" for line in reference.lines]
+
+
 def upload_translations_to_sheets(sheet_service, spreadsheet_id, sheet_name, lang, reference, translation, column_index):
     # Prepare values for the translations column C, D, etc
     language = f"{lang[0]} - {lang[1]}"
-    translations_values = [translation.dict.get(line.key, "")
-                           if is_translation(line) else "" for line in reference.lines]
-    values = [[language]] + [[translation.header]] + [[translation] for translation in translations_values]
-    upload_to_sheets(sheet_service, spreadsheet_id, sheet_name, values, column_index)
+    translation_metadata = translation_data(reference, translation, 'metadata')
+    translation_values = translation_data(reference, translation, 'value')
+
+    metadata = [[language]] + [['METADATA']] + [[value] for value in translation_metadata]
+    upload_to_sheets(sheet_service, spreadsheet_id, sheet_name, metadata, column_index)
+    
+    values = [[language]] + [[translation.header]] + [[value] for value in translation_values]
+    upload_to_sheets(sheet_service, spreadsheet_id, sheet_name, values, column_index + 1)
 
 
 def upload_keys_to_sheets(sheet_service, spreadsheet_id, sheet_name, reference):
@@ -197,10 +225,10 @@ def upload_localizable_files(sheet_service, sheet_id, sheet_name, languages, res
     upload_keys_to_sheets(sheet_service, sheet_id, sheet_name, reference)
 
     # Upload translations for each language
-    for index, lang in enumerate(languages, start=3):  # Starting from column C
+    for index, lang in enumerate(languages):
         file_path = os.path.join(resources_path, f'{lang[0]}.lproj/{file_name}')
         translation = parse_localizable_file(file_path, False)
-        upload_translations_to_sheets(sheet_service, sheet_id, sheet_name, lang, reference, translation, index)
+        upload_translations_to_sheets(sheet_service, sheet_id, sheet_name, lang, reference, translation, index * 2 + 3)
 
 
 def download_from_sheets(sheet_service, spreadsheet_id, sheet_name, num_columns):
@@ -211,29 +239,34 @@ def download_from_sheets(sheet_service, spreadsheet_id, sheet_name, num_columns)
 
 
 def download_localizable_files(sheet_service, spreadsheet_id, sheet_name, languages, resources_path, file_name):
-    values = download_from_sheets(sheet_service, spreadsheet_id, sheet_name, len(languages) + 2)
+    values = download_from_sheets(sheet_service, spreadsheet_id, sheet_name, len(languages) * 2 + 2)
     comments_column = 0
     key_column = 1
 
-    for index, lang in enumerate(languages, start=2):  # Starting from column C
+    for index, lang in enumerate(languages):
         language_code, _ = lang
         file_path = f"{language_code}.lproj/{file_name}"
         output_path = os.path.join(resources_path, file_path)
         with open(output_path, 'w', encoding='utf-8') as file:
+            metadata_index = index * 2 + 2
+            value_index = metadata_index + 1
 
             # Write the header
-            header = item_or_empty(values[1], index)
+            header = item_or_empty(values[1], value_index)
             if header != "":
                 file.write(f"{header}\n")
 
             for row in values[2:]:
                 comment = item_or_empty(row, comments_column)
                 key = item_or_empty(row, key_column)
-                value = item_or_empty(row, index)
+                metadata = item_or_empty(row, metadata_index)
+                value = item_or_empty(row, value_index)
                 if comment != "":
                     formatted_comment = comment.replace(empty_line, "")
                     file.write(f"{formatted_comment}\n")
                 elif key != "" and value != "":
+                    if metadata != "":
+                        file.write(f"{metadata_prefix} {metadata}\n")
                     file.write(f'"{key}" = "{encode_escaped_string(value)}";\n')
         print(f"Downloaded '{file_path}")
 
