@@ -43,6 +43,22 @@
                 "--sheet-name",
                 "Sheet1"
             ]
+        } ,
+        {
+            "name": "[Mohamed] ChatGPT",
+            "type": "python",
+            "request": "launch",
+            "program": "chatgpt-translation_importer.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "--sheet-url",
+                "https://docs.google.com/spreadsheets/d/1hqhbv19ohkUCfFp0u0hiva1aGqVIUIboR4_8Y5_IUng/edit#gid=0",
+                "--file",
+                "chatgpt-translations.json",
+                "--sheet-name",
+                "Sheet1"
+            ]
         }
     ]
 }

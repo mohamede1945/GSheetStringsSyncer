@@ -161,4 +161,4 @@ cython_debug/
 
 credentials.json
 token.pickle
-
+chatgpt-translations.json

@@ -74,23 +74,23 @@ def column_letter(number):
 
 
 def start_sheets_service():
-    creds = None
+    credentials = None
     # The file token.pickle stores the user's access and refresh tokens.
     if os.path.exists('token.pickle'):
         with open('token.pickle', 'rb') as token:
-            creds = pickle.load(token)
+            credentials = pickle.load(token)
     # If there are no (valid) credentials available, let the user log in.
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+    if not credentials or not credentials.valid:
+        if credentials and credentials.expired and credentials.refresh_token:
+            credentials.refresh(Request())
         else:
             flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-            creds = flow.run_local_server(port=0)
+            credentials = flow.run_local_server(port=0)
         # Save the credentials for the next run
         with open('token.pickle', 'wb') as token:
-            pickle.dump(creds, token)
+            pickle.dump(credentials, token)
 
-    service = build('sheets', 'v4', credentials=creds)
+    service = build('sheets', 'v4', credentials=credentials)
 
     # Call the Sheets API
     sheet = service.spreadsheets()
